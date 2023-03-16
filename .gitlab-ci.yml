@@ -31,6 +31,9 @@ variables:
   FMHA_TESTS: //xla/service/gpu/tests:all
   FMHA_JOB: 1
 
+  IMAGE_TAG: tf_build_openxla-${CI_JOB_ID}
+  CONTAINER_TAG: xla-test-${CI_JOB_ID}
+
 stages:
   - rebase # schedule used only
   - unit test
