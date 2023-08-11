@@ -46,6 +46,7 @@ namespace gpu {
 struct GpufMHADescriptor {
   CudnnfMHAKind kind;
   CudnnfMHABackendConfig backend_config;
+  bool is_flash_attention;
   Shape lhs_bmm1_shape;
   Shape rhs_bmm1_shape;
   Shape rhs_bmm2_shape;
@@ -62,6 +63,7 @@ struct GpufMHADescriptor {
 struct GpufMHABackwardDescriptor {
   CudnnfMHAKind kind;
   CudnnfMHABackendConfig backend_config;
+  bool is_flash_attention;
   Shape bmm1_grad_gemm1_rhs_shape;
   Shape bmm1_grad_gemm2_rhs_shape;
   Shape bmm2_grad_gemm1_lhs_shape;
@@ -75,6 +77,7 @@ struct GpufMHABackwardDescriptor {
   DotDimensionNumbers bmm2_grad_gemm1_dnums;
   DotDimensionNumbers bmm2_grad_gemm2_dnums;
 
+  std::optional<Shape> fwd_output_shape;
   std::optional<Shape> mask_shape;
   std::optional<Shape> d_bias_shape;
 };
@@ -91,7 +94,7 @@ struct GpufMHAConfig {
   std::optional<int64_t> seed;
 
   se::dnn::AlgorithmDesc algorithm;
-
+  bool is_flash_attention;
   // bias -> [1, num_attn_heads, q_seq_len, kv_seq_len]
   // mask -> [batch_size, 1, q_seq_len, kv_seq_len]
   se::dnn::MatmulTensorDescriptor lhs_bmm1;
@@ -119,7 +122,7 @@ struct GpufMHABackwardConfig {
   std::optional<int64_t> seed;
 
   se::dnn::AlgorithmDesc algorithm;
-
+  bool is_flash_attention;
   // mask -> [batch_size, 1, q_seq_len, kv_seq_len]
   // d_bias -> [1, num_heads, q_seq_len, kv_seq_len]
   se::dnn::MatmulTensorDescriptor bmm1_grad_gemm1_rhs;
@@ -131,8 +134,11 @@ struct GpufMHABackwardConfig {
   se::dnn::TensorDescriptor d_bmm1_rhs;
   se::dnn::TensorDescriptor d_bmm2_rhs;
   se::dnn::TensorDescriptor d_s;
-  std::optional<se::dnn::TensorDescriptor> d_bias;
+  se::dnn::TensorDescriptor softmax_sum;
+  se::dnn::TensorDescriptor d_Q_accum;
   std::optional<se::dnn::TensorDescriptor> mask;
+  std::optional<se::dnn::TensorDescriptor> d_bias;
+  std::optional<se::dnn::TensorDescriptor> fwd_output;
 };
 
 // Implementation struct exposed for debugging and log analysis.
@@ -165,9 +171,13 @@ struct GpufMHABackwardParams {
       se::DeviceMemoryBase d_output_buffer,
       se::DeviceMemoryBase d_bmm1_lhs_buffer,
       se::DeviceMemoryBase d_bmm1_rhs_buffer,
-      se::DeviceMemoryBase d_bmm2_rhs_buffer, se::DeviceMemoryBase d_s_buffer,
+      se::DeviceMemoryBase d_bmm2_rhs_buffer,
+      std::optional<se::DeviceMemoryBase> d_s_buffer,
+      std::optional<se::DeviceMemoryBase> softmax_sum_buffer,
+      std::optional<se::DeviceMemoryBase> d_Q_accum_buffer,
       std::optional<se::DeviceMemoryBase> mask_buffer,
-      std::optional<se::DeviceMemoryBase> d_bias_buffer);
+      std::optional<se::DeviceMemoryBase> d_bias_buffer,
+      std::optional<se::DeviceMemoryBase> fwd_output_buffer);
 
   const GpufMHABackwardConfig* config;  // Not owned
   se::DeviceMemoryBase bmm1_grad_gemm1_rhs_buffer;
@@ -178,9 +188,12 @@ struct GpufMHABackwardParams {
   se::DeviceMemoryBase d_bmm1_lhs_buffer;
   se::DeviceMemoryBase d_bmm1_rhs_buffer;
   se::DeviceMemoryBase d_bmm2_rhs_buffer;
-  se::DeviceMemoryBase d_s_buffer;
-  std::optional<se::DeviceMemoryBase> d_bias_buffer;
+  std::optional<se::DeviceMemoryBase> d_s_buffer;
+  std::optional<se::DeviceMemoryBase> softmax_sum_buffer;
+  std::optional<se::DeviceMemoryBase> d_Q_accum_buffer;
   std::optional<se::DeviceMemoryBase> mask_buffer;
+  std::optional<se::DeviceMemoryBase> d_bias_buffer;
+  std::optional<se::DeviceMemoryBase> fwd_output_buffer;
 };
 
 class FusedMultiHeadedAttentionRunner {
@@ -381,9 +394,12 @@ Status RunGpuFMHABackward(const GpufMHABackwardConfig& fmha_config,
                           se::DeviceMemoryBase d_bmm1_lhs_buffer,
                           se::DeviceMemoryBase d_bmm1_rhs_buffer,
                           se::DeviceMemoryBase d_bmm2_rhs_buffer,
-                          se::DeviceMemoryBase d_s_buffer,
+                          std::optional<se::DeviceMemoryBase> d_s_buffer,
+                          std::optional<se::DeviceMemoryBase> softmax_sum_buffer,
+                          std::optional<se::DeviceMemoryBase> d_Q_accum_buffer,
                           std::optional<se::DeviceMemoryBase> mask_buffer,
                           std::optional<se::DeviceMemoryBase> d_bias_buffer,
+                          std::optional<se::DeviceMemoryBase> fwd_output_buffer,
                           se::Stream* stream, RunFusedMHABackwardOptions = {});
 
 std::string ToString(const GpufMHAConfig& config);

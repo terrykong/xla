@@ -102,6 +102,10 @@ StatusOr<bool> FuseArgPrologueTransposeWithcuDNNFMHA(
   absl::Span<const int64_t> checked_dims;
   std::vector<int64_t> checked_dims_vec;
 
+  // should_contracting_be_fastest = true meaning contracting dim is the hidden dim
+  // fwd bmm1/bwd bmm2grad2 should set it to true
+  // should_contracting_be_fastest = false meaning non contracting dim is the hidden dim
+  // fwd bmm2/bwd bmm2grad1 bmm1grad1 bmm1grad2 should set it to false
   if (should_contracting_be_fastest) {
     checked_dims = is_lhs ? new_bmm_dot_dims.lhs_contracting_dimensions()
                           : new_bmm_dot_dims.rhs_contracting_dimensions();
@@ -137,9 +141,7 @@ StatusOr<bool> FuseArgPrologueTransposeWithcuDNNFMHA(
   absl::Span<const int64_t> minor_to_major_bmm =
       transpose_arg_operand->shape().layout().minor_to_major();
   if ((minor_to_major_bmm[0] != new_bmm_checked_dims[0]) &&
-      ((transpose_arg_operand->shape().dimensions().at(
-            new_bmm_checked_dims[0]) == 64) ||
-       (IsBwdCustomCallTofMHA(*fmha) && operand_index == 3))) {
+      !(IsBwdCustomCallTofMHA(*fmha) && operand_index == 3)) {
     return false;
   }
   if (should_contracting_be_fastest) {
@@ -198,8 +200,10 @@ StatusOr<bool> FuseArgPrologueTransposeWithcuDNNFMHA(
   }
   if (IsFwdCustomCallTofMHA(*fmha)) {
     if (operand_index == 0 || operand_index == 1) {
+      // Q or K
       *new_fmha_config.mutable_bmm1_dot_dimension_numbers() = new_bmm_dot_dims;
     } else {
+      // V
       *new_fmha_config.mutable_bmm2_dot_dimension_numbers() = new_bmm_dot_dims;
     }
   } else {
