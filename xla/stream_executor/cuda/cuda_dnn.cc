@@ -3586,7 +3586,6 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnTensor(
 #endif  // CUDNN_VERSION >= 8900 && TF_ENABLE_CUDNN_FRONTEND
 }
 
-#define CUDNN_VERSION 8903
 #if (CUDNN_VERSION >= 8800 && TF_ENABLE_CUDNN_FRONTEND)
 enum CudnnfMHAUid {
   Q_ID = 400,
@@ -6391,6 +6390,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnFlashAttentionDropoutFwdTensor(
                       .setRngDistribution(CUDNN_RNG_DISTRIBUTION_BERNOULLI)
                       .setBernoulliDistProbability(1.0 - dropout_rate)
                       .build();
+
   // Create the rng Node.
   auto rng_op =
       cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RNG_DESCRIPTOR)
@@ -6465,6 +6465,7 @@ GetCudnnFlashAttentionOperationGraph(
       VLOG(4) << "\n activation(s): " << (*activation_descriptor).ToString();
     }
   }
+
   // cnn_infer needs to be preloaded for fMHA as well. Reusing the function
   // created for convolution for fMHA.
   PreloadCudnnSubLibsHelper(dnn::ConvolutionKind::FORWARD);
@@ -6541,17 +6542,17 @@ GetCudnnFlashAttentionOperationGraph(
       CreateCudnnScaleTensor(intermediate_ops, intermediate_bmm2_lhs_dims, intermediate_bmm2_lhs_strides,
                              dnn::DataType::kFloat, tensor_s));
 
-  auto bmm2_input_tensor = std::move(alpha_scale_out);
+  // auto bmm2_input_tensor = std::move(alpha_scale_out);
 
-  if (use_bias) {
-    // Create bias op and tensor
-    TF_ASSIGN_OR_RETURN(
-        auto bias_out,
-        CreateCudnnFlashAttentionBiasFwdTensor(intermediate_ops, intermediate_bmm2_lhs_dims,
-                              intermediate_bmm2_lhs_strides,
-                              bias_descriptor.type(), bmm2_input_tensor));
-    bmm2_input_tensor = std::move(bias_out);
-  }
+  // if (use_bias) {
+  //   // Create bias op and tensor
+  //   TF_ASSIGN_OR_RETURN(
+  //       auto bias_out,
+  //       CreateCudnnFlashAttentionBiasFwdTensor(intermediate_ops, intermediate_bmm2_lhs_dims,
+  //                             intermediate_bmm2_lhs_strides,
+  //                             bias_descriptor.type(), bmm2_input_tensor));
+  //   bmm2_input_tensor = std::move(bias_out);
+  // }
 
   // Create mask op and tensor
   TF_ASSIGN_OR_RETURN(
@@ -6559,8 +6560,8 @@ GetCudnnFlashAttentionOperationGraph(
       CreateCudnnFlashAttentionCausalMaskTensor(intermediate_ops, intermediate_bmm2_lhs_dims,
                             intermediate_bmm2_lhs_strides,
                             intermediate_bmm2_lhs_descriptor.type(),
-                            bmm2_input_tensor));
-  bmm2_input_tensor = std::move(mask_out);
+                            alpha_scale_out));
+  // bmm2_input_tensor = std::move(mask_out);
   
   
   // Create Softmax tensor
@@ -6572,9 +6573,9 @@ GetCudnnFlashAttentionOperationGraph(
                           intermediate_ops, intermediate_bmm2_lhs_dims,
                           intermediate_bmm2_lhs_strides,
                           intermediate_bmm2_lhs_descriptor.type(),
-                          /*input_tensor*/ bmm2_input_tensor,
+                          /*input_tensor*/ mask_out,
                           /*is_virtual*/ !should_output_softmax));
-  bmm2_input_tensor = std::move(softmax_fwd_out);
+  // bmm2_input_tensor = std::move(softmax_fwd_out);
   
   // Create dropout tensor
   // dropout is always virtual in inference or training for flash attention
@@ -6584,8 +6585,8 @@ GetCudnnFlashAttentionOperationGraph(
           intermediate_ops, intermediate_bmm2_lhs_dims,
           intermediate_bmm2_lhs_strides,
           intermediate_bmm2_lhs_descriptor.type(),
-          /*input_tensor*/ bmm2_input_tensor, *dropout_rate));
-  bmm2_input_tensor = std::move(dropout_out);
+          /*input_tensor*/ softmax_fwd_out, *dropout_rate));
+  // bmm2_input_tensor = std::move(dropout_out);
   
   
   std::vector<int64_t> bmm2_rhs_dims =
@@ -6617,7 +6618,7 @@ GetCudnnFlashAttentionOperationGraph(
   RETURN_MSG_IF_CUDNN_ERROR(bmm2_desc);
   auto bmm2_op = cudnn_frontend::OperationBuilder(
                      CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
-                     .setaMatDesc(bmm2_input_tensor)
+                     .setaMatDesc(dropout_out)
                      .setbMatDesc(tensor_v)
                      .setcMatDesc(tensor_o)
                      .setmatmulDesc(bmm2_desc)
@@ -6695,6 +6696,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnFlashAttentionDropoutBwdTensor(
                       .setRngDistribution(CUDNN_RNG_DISTRIBUTION_BERNOULLI)
                       .setBernoulliDistProbability(1.0 - dropout_rate)
                       .build();
+
   // Create the rng Node.
   auto rng_op =
       cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RNG_DESCRIPTOR)
@@ -6928,7 +6930,7 @@ GetCudnnFlashAttentionBackwardOperationGraph(
   for (auto stride : do_strides) {
     do_reduction_strides.push_back(stride / reduced_dim_len);
   }
-  // flash attention TODO: it is max in the sample
+
   TF_ASSIGN_OR_RETURN(
       auto tensor_dot_product_reduction,
       CreateCudnnTensor(do_reduction_dims, do_reduction_strides,
@@ -7713,13 +7715,13 @@ tsl::Status CudnnSupport::DoConvolve(
 // ugliness that already exists in the CUDA API.
 class ScalingParam {
  public:
-  explicit ScalingParam(double value)
+  explicit ScalingParam(float value)
       : as_double_(value),
         as_float_(value),
         as_half_(value),
         as_bfloat16_(value),
         default_target_dtype_(dnn::DataType::kFloat) {}
-  explicit ScalingParam(double value, dnn::DataType element_type)
+  explicit ScalingParam(float value, dnn::DataType element_type)
       : as_double_(value),
         as_float_(value),
         as_half_(value),
@@ -7934,6 +7936,7 @@ class CudnnExecutionPlanRunner<void(Args...)>
     auto cudnn = cudnn_->GetHandle(parent_, stream);
 
     size_t workspace_size = plan_.getWorkspaceSize();
+
     RETURN_MSG_IF_CUDNN_ERROR(plan_);
     bool should_add_scalars =
         !scalar_input_uids_.empty() && !scalar_input_values_.empty();
@@ -9013,20 +9016,23 @@ CudnnSupport::FusedMHARunnerFromDesc(
   int64_t dropout_rng_seed = seed == std::nullopt ? 0 : *seed;
 
   int64_t dropout_rng_offset = 0;
+
   if (is_flash_attention) {
-    ScalingParam alpha_scale(1.0, dnn::DataType::kFloat);
+    ScalingParam alpha_scale(1.0f, dnn::DataType::kFloat);
     scalar_input_values = {alpha_scale};
     scalar_input_uids = {CudnnfMHAUid::ALPHA_SCALE_ID};
     scalar_input_uids.push_back(CudnnfMHAUid::DROPOUT_SCALE_ID);
     // before 8.9.3 it should be half/bf16, after 8.9.3, it could be any type, use fp32 here
-    double dropout_scale_value = (1.0 / (1.0 - (is_flash_attention ? 0 : *dropout_rate)));
-    ScalingParam dropout_scale(dropout_scale_value, bmm1_lhs_descriptor.type());
+    // float dropout_scale_value = (1.0f / (1.0f - (is_flash_attention ? 0 : *dropout_rate)));
+    float dropout_scale_value = 1.0f;
+    ScalingParam dropout_scale(dropout_scale_value, dnn::DataType::kFloat);
     scalar_input_values.push_back(dropout_scale);
     dropout_rng_offset = GetDropoutRngOffset(intermediate_shape);
     
     // push negative infinity here
     scalar_input_uids.push_back(CudnnfMHAUid::NEG_INFINITY_ID);
-    double negative_infinity_value = -std::numeric_limits<double>::infinity();
+    // float negative_infinity_value = -std::numeric_limits<float>::infinity();
+    float negative_infinity_value = -1.0E+10f;
     ScalingParam negative_infinity(negative_infinity_value,
                                    dnn::DataType::kFloat);
     scalar_input_values.push_back(negative_infinity);
@@ -9082,6 +9088,7 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
 
   bool use_dropout = dropout_rate && *dropout_rate > 0.0;
   std::vector<int64_t> intermediate_shape;
+
   TF_ASSIGN_OR_RETURN(
       auto op_graph,
       is_flash_attention?
@@ -9124,17 +9131,19 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
                       CudnnfMHAUid::NEG_INFINITY_ID,
                       CudnnfMHAUid::SCALE_PROB_ID};
     // alpha scale
-    ScalingParam alpha_scale(scale, dnn::DataType::kFloat);
+    ScalingParam alpha_scale(1.0f, dnn::DataType::kFloat);
     // dropout scale
-    double dropout_scale_value =
-        use_dropout ? (1.0 / (1.0 - *dropout_rate)) : 1.0;
-    ScalingParam dropout_scale(dropout_scale_value, bmm1_grad_gemm1_rhs_descriptor.type());
+    float dropout_scale_value = 1.0f;
+        // use_dropout ? (1.0f / (1.0f - *dropout_rate)) : 1.0f;
+    ScalingParam dropout_scale(dropout_scale_value, dnn::DataType::kFloat);
     // negative infinity
-    double negative_infinity_value = -std::numeric_limits<double>::infinity();
+    // float negative_infinity_value = -std::numeric_limits<float>::infinity();
+    float negative_infinity_value = -1.0E+10f;
     ScalingParam negative_infinity(negative_infinity_value,
                                    dnn::DataType::kFloat);
     // scale prob
-    double scale_prob_value = 1.0 - *dropout_rate;
+    // float scale_prob_value = 1.0 - *dropout_rate;
+    float scale_prob_value = 1.0f;
     ScalingParam scale_prob(scale_prob_value,
                                    dnn::DataType::kFloat);
     scalar_values = {alpha_scale, dropout_scale, negative_infinity, scale_prob};
