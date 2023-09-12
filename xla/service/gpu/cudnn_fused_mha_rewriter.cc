@@ -1557,9 +1557,16 @@ StatusOr<bool> FuseBwdMultiHeadedAttentionBlock(
   // Fwd act is different shape and datatype for flash attention
   // if is flash attention, add fwd output to input list
   if(fwd_config.is_flash_attention()) {
-    HloInstruction* fwd_output =
-        comp->AddInstruction(HloInstruction::CreateGetTupleElement(
-            fwd_fmha_call->shape().tuple_shapes(0), fwd_fmha_call, 0));
+    HloInstruction* fwd_output;
+    for (auto user: fwd_fmha_call->users()) {
+      if (user->opcode() == HloOpcode::kGetTupleElement && user->tuple_index() == 0) {
+        fwd_output = user;
+      }
+    }
+    // should be able to find the instruction
+    DCHECK(fwd_output != nullptr);
+    // check dO and O have the same layout as it is required by cuDNN
+    DCHECK(fwd_output->shape() == d_output_grad->shape());
     operands.push_back(fwd_output);
   }
 

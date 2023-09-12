@@ -6413,7 +6413,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnFlashAttentionDropoutFwdTensor(
   TF_ASSIGN_OR_RETURN(
       auto dropout_scale_tensor,
       CreateCudnnTensor(
-          scale_dims, scale_strides, CudnnfMHAUid::DROPOUT_SCALE_ID, dtype, 1,
+          scale_dims, scale_strides, CudnnfMHAUid::DROPOUT_SCALE_ID, dnn::DataType::kFloat, 1,
           -1,
           /*is_virtual*/ false,
           /*cudnn_tensor_order_type*/ CUDNN_TENSOR_REORDERING_NONE,
@@ -6542,7 +6542,7 @@ GetCudnnFlashAttentionOperationGraph(
       CreateCudnnScaleTensor(intermediate_ops, intermediate_bmm2_lhs_dims, intermediate_bmm2_lhs_strides,
                              dnn::DataType::kFloat, tensor_s));
 
-  // auto bmm2_input_tensor = std::move(alpha_scale_out);
+  auto bmm2_input_tensor = std::move(alpha_scale_out);
 
   // if (use_bias) {
   //   // Create bias op and tensor
@@ -6560,8 +6560,8 @@ GetCudnnFlashAttentionOperationGraph(
       CreateCudnnFlashAttentionCausalMaskTensor(intermediate_ops, intermediate_bmm2_lhs_dims,
                             intermediate_bmm2_lhs_strides,
                             intermediate_bmm2_lhs_descriptor.type(),
-                            alpha_scale_out));
-  // bmm2_input_tensor = std::move(mask_out);
+                            bmm2_input_tensor));
+  bmm2_input_tensor = std::move(mask_out);
   
   
   // Create Softmax tensor
@@ -6573,9 +6573,9 @@ GetCudnnFlashAttentionOperationGraph(
                           intermediate_ops, intermediate_bmm2_lhs_dims,
                           intermediate_bmm2_lhs_strides,
                           intermediate_bmm2_lhs_descriptor.type(),
-                          /*input_tensor*/ mask_out,
+                          /*input_tensor*/ bmm2_input_tensor,
                           /*is_virtual*/ !should_output_softmax));
-  // bmm2_input_tensor = std::move(softmax_fwd_out);
+  bmm2_input_tensor = std::move(softmax_fwd_out);
   
   // Create dropout tensor
   // dropout is always virtual in inference or training for flash attention
@@ -6586,7 +6586,7 @@ GetCudnnFlashAttentionOperationGraph(
           intermediate_bmm2_lhs_strides,
           intermediate_bmm2_lhs_descriptor.type(),
           /*input_tensor*/ softmax_fwd_out, *dropout_rate));
-  // bmm2_input_tensor = std::move(dropout_out);
+  bmm2_input_tensor = std::move(dropout_out);
   
   
   std::vector<int64_t> bmm2_rhs_dims =
@@ -6618,7 +6618,7 @@ GetCudnnFlashAttentionOperationGraph(
   RETURN_MSG_IF_CUDNN_ERROR(bmm2_desc);
   auto bmm2_op = cudnn_frontend::OperationBuilder(
                      CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
-                     .setaMatDesc(dropout_out)
+                     .setaMatDesc(bmm2_input_tensor)
                      .setbMatDesc(tensor_v)
                      .setcMatDesc(tensor_o)
                      .setmatmulDesc(bmm2_desc)
@@ -6719,7 +6719,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnFlashAttentionDropoutBwdTensor(
   TF_ASSIGN_OR_RETURN(
       auto dropout_scale_tensor,
       CreateCudnnTensor(
-          scale_dims, scale_strides, CudnnfMHAUid::DROPOUT_SCALE_ID, dtype, 1,
+          scale_dims, scale_strides, CudnnfMHAUid::DROPOUT_SCALE_ID, dnn::DataType::kFloat, 1,
           -1,
           /*is_virtual*/ false,
           /*cudnn_tensor_order_type*/ CUDNN_TENSOR_REORDERING_NONE,
@@ -7170,7 +7170,7 @@ TF_ASSIGN_OR_RETURN(
       auto tensor_dropout_scale,
       CreateCudnnTensor(
           scale_dims, scale_strides, CudnnfMHAUid::DROPOUT_SCALE_ID, 
-          dtype, 1, -1,
+          dnn::DataType::kFloat, 1, -1,
           /*is_virtual*/ false,
           /*cudnn_tensor_order_type*/ CUDNN_TENSOR_REORDERING_NONE,
           /*is_value*/ true));
@@ -9014,7 +9014,6 @@ CudnnSupport::FusedMHARunnerFromDesc(
   std::vector<int64_t> scalar_input_uids;
 
   int64_t dropout_rng_seed = seed == std::nullopt ? 0 : *seed;
-
   int64_t dropout_rng_offset = 0;
 
   if (is_flash_attention) {
@@ -9023,16 +9022,14 @@ CudnnSupport::FusedMHARunnerFromDesc(
     scalar_input_uids = {CudnnfMHAUid::ALPHA_SCALE_ID};
     scalar_input_uids.push_back(CudnnfMHAUid::DROPOUT_SCALE_ID);
     // before 8.9.3 it should be half/bf16, after 8.9.3, it could be any type, use fp32 here
-    // float dropout_scale_value = (1.0f / (1.0f - (is_flash_attention ? 0 : *dropout_rate)));
-    float dropout_scale_value = 1.0f;
+    float dropout_scale_value = (1.0f / (1.0f - (is_flash_attention ? 0 : *dropout_rate)));
     ScalingParam dropout_scale(dropout_scale_value, dnn::DataType::kFloat);
     scalar_input_values.push_back(dropout_scale);
     dropout_rng_offset = GetDropoutRngOffset(intermediate_shape);
-    
+
     // push negative infinity here
     scalar_input_uids.push_back(CudnnfMHAUid::NEG_INFINITY_ID);
-    // float negative_infinity_value = -std::numeric_limits<float>::infinity();
-    float negative_infinity_value = -1.0E+10f;
+    float negative_infinity_value = -std::numeric_limits<float>::infinity();
     ScalingParam negative_infinity(negative_infinity_value,
                                    dnn::DataType::kFloat);
     scalar_input_values.push_back(negative_infinity);
@@ -9088,7 +9085,6 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
 
   bool use_dropout = dropout_rate && *dropout_rate > 0.0;
   std::vector<int64_t> intermediate_shape;
-
   TF_ASSIGN_OR_RETURN(
       auto op_graph,
       is_flash_attention?
@@ -9133,17 +9129,15 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
     // alpha scale
     ScalingParam alpha_scale(1.0f, dnn::DataType::kFloat);
     // dropout scale
-    float dropout_scale_value = 1.0f;
-        // use_dropout ? (1.0f / (1.0f - *dropout_rate)) : 1.0f;
+    float dropout_scale_value =
+        use_dropout ? (1.0f / (1.0f - *dropout_rate)) : 1.0f;
     ScalingParam dropout_scale(dropout_scale_value, dnn::DataType::kFloat);
     // negative infinity
-    // float negative_infinity_value = -std::numeric_limits<float>::infinity();
-    float negative_infinity_value = -1.0E+10f;
+    float negative_infinity_value = -std::numeric_limits<float>::infinity();
     ScalingParam negative_infinity(negative_infinity_value,
                                    dnn::DataType::kFloat);
     // scale prob
-    // float scale_prob_value = 1.0 - *dropout_rate;
-    float scale_prob_value = 1.0f;
+    float scale_prob_value = 1.0 - *dropout_rate;
     ScalingParam scale_prob(scale_prob_value,
                                    dnn::DataType::kFloat);
     scalar_values = {alpha_scale, dropout_scale, negative_infinity, scale_prob};
