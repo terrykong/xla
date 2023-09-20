@@ -2380,6 +2380,7 @@ xla_cc_test(
         "local_client_aot_test.cc",
         ":local_client_aot_test_computation.o",
     ],
+    tags = ["xla_disable"],
     linkstatic = 1,
     deps = [
         "//xla:executable_run_options",
@@ -2798,4 +2799,161 @@ xla_test(
         "//xla:test_helpers",
         "@tsl//tsl/platform:platform_port",
     ],
+)
+
+test_suite(
+    name="test_suite_00_l1",
+    tests = [
+        "//xla/tests:local_client_allocation_test",
+        "//xla/tests:convolution_test_cudnn_frontend_disabled",
+        "//xla/tests:reduce_precision_test",
+        "//xla/tests:deconstruct_tuple_test",
+        "//xla/tests:pred_test",
+        "//xla/tests:convolution_test",
+        "//xla/tests:vector_ops_reduce_test",
+        "//xla/tests:reverse_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_01_l1",
+    tests = [
+        "//xla/tests:sample_file_test",
+        "//xla/tests:conv_depthwise_test",
+        "//xla/tests:collective_pipeliner_execution_test",
+        "//xla/tests:pad_test",
+        "//xla/tests:batch_normalization_test",
+        "//xla/tests:buffer_donation_test",
+        "//xla/tests:cpu_gpu_fusion_test",
+        "//xla/tests:fmax_fmin_test",
+        "//xla/tests:llvm_compiler_test",
+        "//xla/tests:query_inferred_shape_test",
+        "//xla/tests:compilation_cache_test",
+        "//xla/tests:round_trip_transfer_test",
+        "//xla/tests:compute_constant_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_02_l1",
+    tests = [
+        "//xla/tests:dot_operation_single_threaded_runtime_test",
+        "//xla/tests:convolution_test_1d_gpu_alternative_layout",
+        "//xla/tests:conditional_test",
+        "//xla/tests:float8_test",
+        "//xla/tests:slice_test",
+        "//xla/tests:convolution_test_1d_no_vmodule",
+        "//xla/tests:cholesky_test",
+        "//xla/tests:client_test",
+        "//xla/tests:transfer_manager_test",
+        "//xla/tests:multithreaded_compilation_test",
+        "//xla/tests:xla_hlo_profile_test",
+        "//xla/tests:round_trip_packed_literal_test",
+        "//xla/tests:value_inference_test",
+        "//xla/tests:bad_rng_shape_validation_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_03_l1",
+    tests = [
+        "//xla/tests:iota_test",
+        "//xla/tests:convolution_variants_test",
+        "//xla/tests:multioutput_fusion_test",
+        "//xla/tests:replay_test",
+        "//xla/tests:get_dimension_size_test",
+        "//xla/tests:reshape_motion_test",
+        "//xla/tests:convert_test",
+        "//xla/tests:deallocation_test",
+        "//xla/tests:map_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_04_l1",
+    tests = [
+        "//xla/tests:select_and_scatter_test",
+        "//xla/tests:reduce_test",
+        "//xla/tests:grouped_convolution_test",
+        "//xla/tests:constant_reduction_function_test",
+        "//xla/tests:reduce_hlo_test",
+        "//xla/tests:outfeed_in_nested_computation_test",
+        "//xla/tests:half_test",
+        "//xla/tests:axpy_simple_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_05_l1",
+    tests = [
+        "//xla/tests:triangular_solve_test",
+        "//xla/tests:scalar_computations_test",
+        "//xla/tests:floor_ceil_test",
+        "//xla/tests:concat_test",
+        "//xla/tests:check_execution_arity_test",
+        "//xla/tests:while_test",
+        "//xla/tests:reshape_test",
+        "//xla/tests:convolution_test_1d_autotune_disabled",
+        "//xla/tests:bitcast_convert_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_06_l1",
+    tests = [
+        "//xla/tests:all_reduce_test",
+        "//xla/tests:dot_operation_test",
+        "//xla/tests:dynamic_ops_test",
+        "//xla/tests:bfloat16_test",
+        "//xla/tests:matrix_ops_simple_test",
+        "//xla/tests:constants_test",
+        "//xla/tests:conv_depthwise_backprop_filter_test",
+        "//xla/tests:deep_graph_test",
+        "//xla/tests:log_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_07_l1",
+    tests = [
+        "//xla/tests:call_test",
+        "//xla/tests:dot_operation_test_autotune_disabled",
+        "//xla/tests:broadcast_simple_test",
+        "//xla/tests:transpose_test",
+        "//xla/tests:params_test",
+        "//xla/tests:convolution_test_gpu_alternative_layout",
+        "//xla/tests:convolution_test_autotune_disabled",
+        "//xla/tests:xla_ffi_test",
+        "//xla/tests:select_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_08_l1",
+    tests = [
+        "//xla/tests:broadcast_test",
+        "//xla/tests:array_elementwise_ops_test",
+        "//xla/tests:gather_operation_test",
+        "//xla/tests:tuple_test",
+        "//xla/tests:binop_scaling_test",
+        "//xla/tests:scatter_test",
+        "//xla/tests:prng_test",
+        "//xla/tests:unary_op_test",
+        "//xla/tests:sample_text_test",
+    ]
+)
+
+test_suite(
+    name="test_suite_09_l1",
+    tests = [
+        "//xla/tests:reduce_window_test",
+        "//xla/tests:topk_test",
+        "//xla/tests:matmul_test",
+        "//xla/tests:convolution_cudnn_test",
+        "//xla/tests:copy_test",
+        "//xla/tests:convolution_dimension_numbers_test",
+        "//xla/tests:token_hlo_test",
+        "//xla/tests:fft_test",
+        "//xla/tests:vector_ops_simple_test",
+    ]
 )

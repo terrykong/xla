@@ -6,7 +6,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//xla:glob_lit_test.bzl", "glob_lit_tests")
 load(
     "//xla:xla.bzl",
-    "xla_cc_binary",
+    "xla_cc_binary", 
     "xla_cc_test",
 )
 load(
@@ -905,3 +905,94 @@ xla_cc_test(
         "@tsl//tsl/platform:test",
     ],
 )
+
+test_suite(
+    name="test_suite_00_l0",
+    tests = [
+        "//xla/service/gpu/tests:gpu_infeed_test",
+        "//xla/service/gpu/tests:gpu_copy_alone_test",
+        "//xla/service/gpu/tests:gpu_kernel_tiling_test",
+    ]
+)
+test_suite(
+    name="test_suite_10_l0",
+    tests = [
+        "//xla/service/gpu/tests:gpu_input_fusible_slice_test",
+        "//xla/service/gpu/tests:sorting_test",
+        "//xla/service/gpu/tests:gpu_compilation_parallelism_test",
+        "//xla/service/gpu/tests:gpu_fusion_pipeline_test",
+        "//xla/service/gpu/tests:reduction_degenerate_dim_remover_test",
+        "//xla/service/gpu/tests:tree_reduction_rewriter_test",
+        "//xla/service/gpu/tests:triton_naming.hlo.test",
+        "//xla/service/gpu/tests:kernel_reuse.hlo.test",
+        "//xla/service/gpu/tests:launch_dimensions.hlo.test",
+        "//xla/service/gpu/tests:fusion.hlo.test",
+        "//xla/service/gpu/tests:pad_to_static.hlo.test",
+        "//xla/service/gpu/tests:reduce_unnested.hlo.test",
+        "//xla/service/gpu/tests:reduction_vectorization_test",
+        "//xla/service/gpu/tests:gpu_too_many_blocks_test",
+        "//xla/service/gpu/tests:gpu_ldg_test",
+    ]
+)
+test_suite(
+    name="test_suite_20_l0",
+    tests = [
+        "//xla/service/gpu/tests:reduction_layout_normalizer_test",
+        "//xla/service/gpu/tests:pred_arithmetic_test",
+        "//xla/service/gpu/tests:gemm_rewrite_test",
+        "//xla/service/gpu/tests:gpu_atomic_test",
+        "//xla/service/gpu/tests:gpu_ftz_test",
+        "//xla/service/gpu/tests:reduction_vectorization_sm_all.hlo.test",
+        "//xla/service/gpu/tests:element_wise_row_vectorization.hlo.test",
+        "//xla/service/gpu/tests:dynamic_update_slice_inplace.hlo.test",
+        "//xla/service/gpu/tests:add_preds.hlo.test",
+        "//xla/service/gpu/tests:concat.hlo.test",
+        "//xla/service/gpu/tests:calling_convention.hlo.test",
+        "//xla/service/gpu/tests:constant.hlo.test",
+        "//xla/service/gpu/tests:copy.hlo.test",
+        "//xla/service/gpu/tests:copy_nested.hlo.test",
+        "//xla/service/gpu/tests:tensor_float_32_global_var_test_gpu",
+    ]
+)
+test_suite(
+    name="test_suite_30_l0",
+    tests = [
+        "//xla/service/gpu/tests:select_and_scatter_test",
+        "//xla/service/gpu/tests:element_wise_row_vectorization_test",
+        "//xla/service/gpu/tests:gpu_alignment_test",
+        "//xla/service/gpu/tests:fused_scatter.hlo.test",
+        "//xla/service/gpu/tests:fused_slice.hlo.test",
+        "//xla/service/gpu/tests:fused_slice_different_operands.hlo.test",
+        "//xla/service/gpu/tests:rng_get_and_update_state.hlo.test",
+        "//xla/service/gpu/tests:scatter.hlo.test",
+        "//xla/service/gpu/tests:hlo_to_llvm_ir_build_test",
+        "//xla/service/gpu/tests:gpu_spmd_e2e_compile_test",
+        "//xla/service/gpu/tests:gpu_copy_test",
+        "//xla/service/gpu/tests:parallel_reduction_test",
+        "//xla/service/gpu/tests:gpu_dyn_shape_test",
+        "//xla/service/gpu/tests:gpu_fusion_test",
+        "//xla/service/gpu/tests:gpu_noalias_test",
+    ]
+)
+test_suite(
+    name="test_suite_40_l0",
+    tests = [
+        "//xla/service/gpu/tests:swap_conv_operands_test",
+        "//xla/service/gpu/tests:reduction_emitter_test",
+        "//xla/service/gpu/tests:transpose_emitter_test",
+        "//xla/service/gpu/tests:gemm_broadcast_folding_rewrite_test",
+        "//xla/service/gpu/tests:gpu_unrolling_test",
+        "//xla/service/gpu/tests:gpu_index_test",
+        "//xla/service/gpu/tests:dynamic_shared_memory_test",
+        "//xla/service/gpu/tests:reduction_dimension_grouper_test",
+        "//xla/service/gpu/tests:gpu_fused_mha_test",
+        "//xla/service/gpu/tests:gpu_reduce_scatter_creator_test",
+        "//xla/service/gpu/tests:select_and_scatter.hlo.test",
+        "//xla/service/gpu/tests:single_instruction.hlo.test",
+        "//xla/service/gpu/tests:slice_to_dynamic.hlo.test",
+        "//xla/service/gpu/tests:sorting.hlo.test",
+        "//xla/service/gpu/tests:in_place_op_test",
+        "//xla/service/gpu/tests:kernel_launch_test",
+    ]
+)
+

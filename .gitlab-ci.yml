@@ -1,0 +1,610 @@
+variables:
+  OPENXLA_XLA_REPO: ssh://git@gitlab-master.nvidia.com:12051/dl/openxla/xla.git
+  OPENXLA_XLA_HTTPS_REPO: https://gitlab-master.nvidia.com/dl/openxla/xla.git
+  MIRROR_BRANCH: main # sync with https://github.com/openxla/xla.git automatically
+  UPSTREAM_BRANCH: nvidia/main # actual CI triggering branch
+  REF_COMMIT_SHA: main # default is the same as mirror branch
+  DO_REBASE: 0
+  DO_UNIT_TEST_L0: 0
+  DO_UNIT_TEST_L1: 0
+  DO_UNIT_TEST_L2: 0
+  TRIGGER_JAX: 0
+  WORKING_DIR: /tmp/xla/${CI_JOB_ID}
+  EXTRA_DOCKER_RUN_ARGS: "--init --ipc=host --ulimit memlock=-1 --ulimit stack=$$((1024*65536)) --label RUNNER_ID=$${RUNNER_ID}"
+  IMAGE_TAG: tf_build_openxla-${CI_JOB_ID} 
+  CONTAINER_TAG: xla-test-${CI_JOB_ID}
+  L0_TEST_SUITE0: //xla/service/gpu/tests:test_suite_00_l0 //xla/service/gpu:test_suite_01_l0
+  L0_TEST_SUITE1: //xla/service/gpu/tests:test_suite_10_l0 //xla/service/gpu:test_suite_11_l0
+  L0_TEST_SUITE2: //xla/service/gpu/tests:test_suite_20_l0 //xla/service/gpu:test_suite_21_l0
+  L0_TEST_SUITE3: //xla/service/gpu/tests:test_suite_30_l0 //xla/service/gpu:test_suite_31_l0
+  L0_TEST_SUITE4: //xla/service/gpu/tests:test_suite_40_l0 //xla/service/gpu:test_suite_41_l0
+  L1_TEST_SUITE0: //xla/tests:test_suite_00_l1
+  L1_TEST_SUITE1: //xla/tests:test_suite_01_l1
+  L1_TEST_SUITE2: //xla/tests:test_suite_02_l1
+  L1_TEST_SUITE3: //xla/tests:test_suite_03_l1
+  L1_TEST_SUITE4: //xla/tests:test_suite_04_l1
+  L1_TEST_SUITE5: //xla/tests:test_suite_05_l1
+  L1_TEST_SUITE6: //xla/tests:test_suite_06_l1
+  L1_TEST_SUITE7: //xla/tests:test_suite_07_l1
+  L1_TEST_SUITE8: //xla/tests:test_suite_08_l1
+  L1_TEST_SUITE9: //xla/tests:test_suite_09_l1
+  FMHA_TESTS: //xla/service/gpu/tests:all
+  FMHA_JOB: 1
+
+stages:
+  - rebase # schedule used only
+  - unit test
+  - build vars 
+  - trigger jax 
+
+before_script:
+  - echo "${CI_COMMIT_REF_NAME}" "${CI_REGISTRY}" - "${CI_COMMIT_SHA}"
+  - echo "TF_CUDA_COMPUTE_CAPABILITIES=compute_70" >> build.env
+  
+build-vars:
+  stage: build vars
+  script:
+    - export REF_COMMIT_SHA=${CI_COMMIT_SHA}
+    - if [[ ${DO_REBASE} == "1" ]]; then
+        export REF_COMMIT_SHA=$(git ls-remote --heads --refs ${OPENXLA_XLA_REPO} "refs/heads/${UPSTREAM_BRANCH}" 2>/dev/null | awk '{print $1}');
+      fi;
+    - echo "REF_COMMIT_SHA=${REF_COMMIT_SHA}" >> build.env
+    - echo "Current commit to downstream CI" - "${REF_COMMIT_SHA}"
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: '$TRIGGER_JAX == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$TRIGGER_JAX == "1"'
+      when: always
+  tags:
+    - vm-builder
+
+rebase-upstream:
+  stage: rebase
+  script:
+    - rm -rf ${WORKING_DIR}
+    - git config --global user.name "gitlab-runner" &&
+      git config --global user.email "gitlab-runner@nvidia.com" &&
+      git config --global push.default simple &&
+      git clone ${OPENXLA_XLA_REPO} ${WORKING_DIR}
+    - cd ${WORKING_DIR} && git checkout ${MIRROR_BRANCH} # mirror branch might not be default branch
+    - git checkout ${UPSTREAM_BRANCH} # prepare to rebase
+    - pwd && git branch && git remote -v
+    - git rebase ${MIRROR_BRANCH}
+    - git log -30 --pretty=format:"%h %ad | %s%d [%an]" --graph --date=short
+    - git push origin ${UPSTREAM_BRANCH} --force
+    - rm -rf ${WORKING_DIR}
+  allow_failure: false
+  rules:
+    - if: '$DO_REBASE == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_REBASE == "1"'
+      when: always
+  tags:
+    - vm-builder
+
+# Nodes definitions
+.A100_1GPU: &A100_1GPU
+    tags:
+    - A100
+    - 1GPU
+
+#Unit Test list   L0_TESTS: //xla/service/gpu/tests:all //xla/service/gpu:all  
+#L1_TESTS: //xla/tests:all   L2_TESTS: //xla:all //xla/service:all
+.unit_test_template: &UNIT_TEST_TEMPLATE
+  variables:
+      GIT_STRATEGY: clone
+      GET_SOURCES_ATTEMPTS: 3
+  before_script:
+    - pwd && ls -l
+    - docker rm -f ${CONTAINER_TAG}
+    - docker build -f Dockerfile -t ${IMAGE_TAG} .
+    - chmod +x ./test_exec.sh
+  after_script:
+    - set +x; 
+    - rm -rf logs/;
+    - docker cp "${CONTAINER_TAG}:/logs/" "." 2>/dev/null || true;
+    - gzip logs/*.txt 2>/dev/null || true;
+    - docker rm -f ${CONTAINER_TAG} 2>/dev/null || true;
+  artifacts:
+    name: "${JOB_NAME}_${CI_JOB_ID}"
+    paths:
+    - logs/*
+    expire_in: 3 days
+    when: always 
+  retry: 1
+
+.unit_test_l0: &UNIT_TEST_L0
+  stage: unit test
+  allow_failure: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: '$DO_UNIT_TEST_L0 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L0 == "1"'
+      when: always
+  <<: *UNIT_TEST_TEMPLATE
+
+unit_test_l0 1/5:
+  variables:
+    JOB_NAME: "unit_test_l0_1"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE0}"; 
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE0}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 2/5:
+  variables:
+    JOB_NAME: "unit_test_l0_2"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE1}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE1} 
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 3/5:
+  variables:
+    JOB_NAME: "unit_test_l0_3"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE2}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE2}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 4/5:
+  variables:
+    JOB_NAME: "unit_test_l0_4"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE3}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE3}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 5/5:
+  variables:
+    JOB_NAME: "unit_test_l0_5"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE4}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE4}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+.unit_test_l1: &UNIT_TEST_L1
+  stage: unit test
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L1 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L1 == "1"'
+      when: always
+  <<: *UNIT_TEST_TEMPLATE
+
+unit_test_l1 1/10:
+  variables:
+    JOB_NAME: "unit_test_l1_1"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE0}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE0}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 2/10:
+  variables:
+    JOB_NAME: "unit_test_l1_2"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE1}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE1}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 3/10:
+  variables:
+    JOB_NAME: "unit_test_l1_3"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE2}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE2}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 4/10:
+  variables:
+    JOB_NAME: "unit_test_l1_4"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE3}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE3}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 5/10:
+  variables:
+    JOB_NAME: "unit_test_l1_5"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE4}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE4}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 6/10:
+  variables:
+    JOB_NAME: "unit_test_l1_6"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE5}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE5}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 7/10:
+  variables:
+    JOB_NAME: "unit_test_l1_7"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE6}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE6}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 8/10:
+  variables:
+    JOB_NAME: "unit_test_l1_8"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE7}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE7}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 9/10:
+  variables:
+    JOB_NAME: "unit_test_l1_9"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE8}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE8}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 10/10:
+  variables:
+    JOB_NAME: "unit_test_l1_10"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE9}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE9}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+
+.unit_test_l2: &UNIT_TEST_L2
+  stage: unit test
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L2 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L2 == "1"'
+      when: always
+  <<: *UNIT_TEST_TEMPLATE
+
+unit_test_l2 1/2:
+  variables:
+    JOB_NAME: "unit_test_l2_1"
+  script:
+    - echo "Running following test list - //xla:all";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh //xla:all
+  extends:
+    - .unit_test_l2
+  <<: *A100_1GPU
+
+unit_test_l2 2/2:
+  variables:
+    JOB_NAME: "unit_test_l2_2"
+  script:
+    - echo "Running following test list - //xla/service:all";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh //xla/service:all
+  extends:
+    - .unit_test_l2
+  <<: *A100_1GPU
+
+unit_test_l0 2/5:
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE1}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE1}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 3/5:
+  variables:
+    JOB_NAME: "unit_test_l0_3"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE2}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE2}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 4/5:
+  variables:
+    JOB_NAME: "unit_test_l0_4"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE3}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE3}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+unit_test_l0 5/5:
+  variables:
+    JOB_NAME: "unit_test_l0_5"
+  script:
+    - echo "Running following test list - ${L0_TEST_SUITE4}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L0_TEST_SUITE4}
+  extends:
+    - .unit_test_l0
+  <<: *A100_1GPU
+
+.unit_test_l1: &UNIT_TEST_L1
+  stage: unit test
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L1 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L1 == "1"'
+      when: always
+  <<: *UNIT_TEST_TEMPLATE
+
+unit_test_l1 1/10:
+  variables:
+    JOB_NAME: "unit_test_l1_1"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE0}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE0}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 2/10:
+  variables:
+    JOB_NAME: "unit_test_l1_2"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE1}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE1}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 3/10:
+  variables:
+    JOB_NAME: "unit_test_l1_3"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE2}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE2}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 4/10:
+  variables:
+    JOB_NAME: "unit_test_l1_4"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE3}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE3}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 5/10:
+  variables:
+    JOB_NAME: "unit_test_l1_5"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE4}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE4}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 6/10:
+  variables:
+    JOB_NAME: "unit_test_l1_6"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE5}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE5}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 7/10:
+  variables:
+    JOB_NAME: "unit_test_l1_7"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE6}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE6}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 8/10:
+  variables:
+    JOB_NAME: "unit_test_l1_8"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE7}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE7}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 9/10:
+  variables:
+    JOB_NAME: "unit_test_l1_9"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE8}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE8}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+unit_test_l1 10/10:
+  variables:
+    JOB_NAME: "unit_test_l1_10"
+  script:
+    - echo "Running following test list - ${L1_TEST_SUITE9}";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh ${L1_TEST_SUITE9}
+  extends:
+    - .unit_test_l1
+  <<: *A100_1GPU
+
+
+.unit_test_l2: &UNIT_TEST_L2
+  stage: unit test
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L2 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L2 == "1"'
+      when: always
+  <<: *UNIT_TEST_TEMPLATE
+
+unit_test_l2 1/2:
+  variables:
+    JOB_NAME: "unit_test_l2_1"
+  script:
+    - echo "Running following test list - //xla:all";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh //xla:all
+  extends:
+    - .unit_test_l2
+  <<: *A100_1GPU
+
+unit_test_l2 2/2:
+  variables:
+    JOB_NAME: "unit_test_l2_2"
+  script:
+    - echo "Running following test list - //xla/service:all";
+    - docker run --name ${CONTAINER_TAG} $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}
+        bash -ex ./test_exec.sh //xla/service:all
+  extends:
+    - .unit_test_l2
+  <<: *A100_1GPU
+
+unit-test-fmha:
+  variables:
+      GIT_STRATEGY: clone
+      GET_SOURCES_ATTEMPTS: 3
+      JOB_NAME: "unit_test_fmha"
+  stage: unit test
+  script:
+    - pwd && ls -l 
+    - docker rm -f ${CONTAINER_TAG}-fmha
+    - docker build -f Dockerfile.fmha -t ${IMAGE_TAG}-fmha .
+    - echo "Running following test list - ${FMHA_TESTS}";
+    - docker run --name ${CONTAINER_TAG}-fmha $(eval echo ${EXTRA_DOCKER_RUN_ARGS}) --gpus all ${IMAGE_TAG}-fmha 
+        bash -ex ./test_exec.sh ${FMHA_TESTS} "" ${FMHA_JOB}
+    - set +x;
+    - rm -rf logs/;
+    - docker cp "${CONTAINER_TAG}-fmha:/logs/" "." 2>/dev/null || true;
+    - gzip logs/*.txt 2>/dev/null || true;
+    - docker rm -f ${CONTAINER_TAG}-fmha 2>/dev/null || true;
+  allow_failure: false
+  retry: 1 
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: '$DO_UNIT_TEST_L0 == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$DO_UNIT_TEST_L0 == "1"'
+      when: always
+  artifacts:
+    name: "${JOB_NAME}_${CI_JOB_ID}"
+    paths:
+    - logs/*
+    expire_in: 3 days
+    when: always 
+  retry: 1 
+  <<: *A100_1GPU
+
+trigger-jax-toolbox-actions:
+  variables:
+    REF_XLA: ${CI_COMMIT_SHA}
+    JOB_NAME: "trigger-jax-toolbox-actions"
+  stage: trigger jax
+  trigger:
+    project: dl/jax/trigger-jax-toolbox-actions
+    branch: main
+    strategy: depend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: '$TRIGGER_JAX == "0"'
+      when: manual
+      allow_failure: true
+    - if: '$TRIGGER_JAX == "1"' 
+      when: always 
+  needs:
+    - job: build-vars
