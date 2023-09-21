@@ -5,6 +5,7 @@ fmha_job=${3:-0}
 source_dir="/root/.cache/bazel/_bazel_root/"
 destination_dir="/logs"
 bazel_args="--config=cuda --jobs=200 --test_timeout=3600 --nocheck_visibility --test_output=streamed "
+export TF_CUDA_COMPUTE_CAPABILITIES=compute_70
 
 #check input args
 if [ -z "$1" ]; then
