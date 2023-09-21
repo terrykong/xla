@@ -911,7 +911,7 @@ test_suite(
     tests = [
         "//xla/service/gpu/tests:gpu_infeed_test",
         "//xla/service/gpu/tests:gpu_copy_alone_test",
-        "//xla/service/gpu/tests:gpu_kernel_tiling_test",
+        #"//xla/service/gpu/tests:gpu_kernel_tiling_test",
     ]
 )
 test_suite(

@@ -2380,7 +2380,6 @@ xla_cc_test(
         "local_client_aot_test.cc",
         ":local_client_aot_test_computation.o",
     ],
-    tags = ["xla_disable"],
     linkstatic = 1,
     deps = [
         "//xla:executable_run_options",
