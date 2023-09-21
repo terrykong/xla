@@ -743,34 +743,34 @@ ENTRY kernel_entry {
                      /*match_optimized_ir=*/true);
 }
 
-//TEST_F(GpuKernelTilingTest, ColumnMultiOutputVectorization) {
-//  const char *const kHloString = R"(
-//HloModule HandleReductionToVectorAndOtherReduction
-//
-//add {
-//    acc = f16[] parameter(1)
-//    op = f16[] parameter(0)
-//    ROOT out = f16[] add(acc, op)
-//}
-//
-//ENTRY main {
-//    p = f16[4096,4096] parameter(0)
-//    l1 = log(p)
-//    l2 = log(l1)
-//    s = log(l2)
-//    z = f16[] constant(0)
-//    r1 = f16[4096] reduce(p, z), dimensions={0}, to_apply=add
-//    r2 = f16[4096] reduce(s, z), dimensions={0}, to_apply=add
-//    ROOT out = (f16[4096], f16[4096]) tuple(r1, r2)
-//}
-//  )";
-//  auto expected_ir = R"(
-//; CHECK: load <2 x half>, ptr
-//  )";
-//  auto hlo_module = ParseAndReturnVerifiedModule(kHloString).value();
+TEST_F(GpuKernelTilingTest, ColumnMultiOutputVectorization) {
+  const char *const kHloString = R"(
+HloModule HandleReductionToVectorAndOtherReduction
+
+add {
+    acc = f16[] parameter(1)
+    op = f16[] parameter(0)
+    ROOT out = f16[] add(acc, op)
+}
+
+ENTRY main {
+    p = f16[4096,4096] parameter(0)
+    l1 = log(p)
+    l2 = log(l1)
+    s = log(l2)
+    z = f16[] constant(0)
+    r1 = f16[4096] reduce(p, z), dimensions={0}, to_apply=add
+    r2 = f16[4096] reduce(s, z), dimensions={0}, to_apply=add
+    ROOT out = (f16[4096], f16[4096]) tuple(r1, r2)
+}
+  )";
+  auto expected_ir = R"(
+; CHECK: load <2 x half>, ptr
+  )";
+  auto hlo_module = ParseAndReturnVerifiedModule(kHloString).value();
 //  CompileAndVerifyIr(std::move(hlo_module), expected_ir,
 //                     /*match_optimized_ir=*/true);
-//}
+}
 
 TEST_F(GpuKernelTilingTest, Hlo021CopyNoOobAccess) {
   const char *const kHloString = R"(
