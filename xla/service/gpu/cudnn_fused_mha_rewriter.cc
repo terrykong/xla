@@ -1288,6 +1288,7 @@ StatusOr<HloInstruction*> FuseFwdMultiHeadedAttentionBlock(
   HloInstruction* lhs_bmm1;
   HloInstruction* rhs_bmm1;
   HloInstruction* rhs_bmm2;
+  DotDimensionNumbers bmm1dot = bmm_1->dot_dimension_numbers();
   TF_ASSIGN_OR_RETURN(rhs_bmm1, ChangeCheckedDimToFastest(
                                     comp, bmm_1, false /*is_lhs*/,
                                     true /*should_contracting_be_fastest*/));
@@ -1308,7 +1309,7 @@ StatusOr<HloInstruction*> FuseFwdMultiHeadedAttentionBlock(
       bmm_1->dot_dimension_numbers();
   *fmha_config.mutable_bmm2_dot_dimension_numbers() =
       bmm_2->dot_dimension_numbers();
-
+  *((DynCast<HloDotInstruction>(bmm_1))->mutable_dot_dimension_numbers()) = bmm1dot;
   TF_RET_CHECK((dropout_rate >= 0.0 && dropout_rate <= 1.0));
 
   // If scale node is assigned, extract value from it.
@@ -1364,9 +1365,17 @@ StatusOr<HloInstruction*> FuseFwdMultiHeadedAttentionBlock(
         activation_output->opcode() == HloOpcode::kBitcast) {
       HloInstruction* producer = activation_output->mutable_operand(0);
       TF_RET_CHECK(producer->user_count() == 2);
-      activation_output = producer->UserId(activation_output) == 0
+      HloInstruction* bmm2_grad2_user = producer->UserId(activation_output) == 0
                               ? producer->users()[1]
                               : producer->users()[0];
+      // might be (transpose) - bmm2_grad2
+      if(IsBatchedMatmul(bmm2_grad2_user)) {
+        activation_output = producer;
+      } else if(bmm2_grad2_user->opcode() == HloOpcode::kTranspose) {
+        activation_output = bmm2_grad2_user;
+      } else {
+        return InternalError("Unexpected activation patterns");
+      }
     }
     // if it is flash attention, should output softmax stats to the bwd
     if (is_flash_attention) {
