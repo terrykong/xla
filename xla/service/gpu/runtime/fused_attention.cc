@@ -194,6 +194,7 @@ static GpufMHADescriptor GetGpufMHADescriptor(
     absl::Span<const int64_t> intermediate_tensor_layout, AlgorithmConfig algo,
     DotDimensionNumbers bmm1_dot_dimension_numbers,
     DotDimensionNumbers bmm2_dot_dimension_numbers,
+    bool is_flash_attention,
     std::optional<DropoutAttrs> dropout = std::nullopt) {
   GpufMHADescriptor descriptor;
   descriptor.backend_config.set_fmha_scale(fmha_scale);
@@ -250,7 +251,7 @@ static GpufMHADescriptor GetGpufMHADescriptor(
   }
 
   descriptor.kind = kind;
-
+  descriptor.is_flash_attention = is_flash_attention;
   return descriptor;
 }
 
@@ -262,11 +263,16 @@ static GpufMHABackwardDescriptor GetGpufMHABackwardDescriptor(
     std::optional<StridedMemrefView> mask,
     std::optional<StridedMemrefView> d_bias, StridedMemrefView d_bmm1_lhs,
     StridedMemrefView d_bmm1_rhs, StridedMemrefView d_bmm2_rhs,
-    StridedMemrefView d_S, double fmha_scale, AlgorithmConfig algo,
+    std::optional<StridedMemrefView> d_S, std::optional<StridedMemrefView> softmax_sum, 
+    std::optional<StridedMemrefView> d_Q_accum, std::optional<StridedMemrefView> fwd_output,
+    double fmha_scale, AlgorithmConfig algo,
     DotDimensionNumbers bmm1_grad_gemm1_dot_dimension_numbers,
     DotDimensionNumbers bmm1_grad_gemm2_dot_dimension_numbers,
     DotDimensionNumbers bmm2_grad_gemm1_dot_dimension_numbers,
     DotDimensionNumbers bmm2_grad_gemm2_dot_dimension_numbers,
+    absl::Span<const int64_t> intermediate_tensor_dimensions,
+    absl::Span<const int64_t> intermediate_tensor_layout,
+    bool is_flash_attention,
     std::optional<DropoutAttrs> dropout_attrs = std::nullopt) {
   GpufMHABackwardDescriptor descriptor;
   descriptor.backend_config.set_fmha_scale(fmha_scale);
@@ -313,7 +319,15 @@ static GpufMHABackwardDescriptor GetGpufMHABackwardDescriptor(
   descriptor.bmm1_grad_gemm1_rhs_shape = apply_shape(bmm1_grad_gemm1_rhs);
   descriptor.bmm1_grad_gemm2_rhs_shape = apply_shape(bmm1_grad_gemm2_rhs);
   descriptor.bmm2_grad_gemm2_rhs_shape = apply_shape(bmm2_grad_gemm2_rhs);
-  descriptor.bmm2_grad_gemm1_lhs_shape = apply_shape(bmm2_grad_gemm1_lhs);
+  if (is_flash_attention) {
+    // if it is flash attention then bmm2_grad_gemm1_lhs will be softmax_stats instead of P
+    // we need to use real P layout
+    descriptor.bmm2_grad_gemm1_lhs_shape = ShapeUtil::MakeShapeWithDenseLayout(
+      descriptor.bmm2_grad_gemm2_rhs_shape.element_type(), intermediate_tensor_dimensions,
+      intermediate_tensor_layout);
+  } else {
+     descriptor.bmm2_grad_gemm1_lhs_shape = apply_shape(bmm2_grad_gemm1_lhs);
+  }
 
   descriptor.d_output_shape = apply_shape(d_output);
   descriptor.d_bmm1_lhs_shape = apply_shape(d_bmm1_lhs);
@@ -326,14 +340,16 @@ static GpufMHABackwardDescriptor GetGpufMHABackwardDescriptor(
   if (d_bias.has_value()) {
     descriptor.d_bias_shape = apply_shape(*d_bias);
   }
-
+  if (fwd_output.has_value()) {
+    descriptor.fwd_output_shape = apply_shape(*fwd_output);
+  }
   if (dropout_attrs.has_value()) {
     descriptor.backend_config.set_dropout_rate(dropout_attrs->dropout_rate);
     descriptor.backend_config.set_seed(dropout_attrs->seed);
   }
 
   descriptor.kind = kind;
-
+  descriptor.is_flash_attention = is_flash_attention;
   return descriptor;
 }
 
@@ -344,7 +360,7 @@ static absl::Status FusedAttentionForwardImpl(
     StridedMemrefView rhs_bmm2, std::optional<StridedMemrefView> mask,
     std::optional<StridedMemrefView> bias, StridedMemrefView output,
     FlatMemrefView scratch, std::optional<StridedMemrefView> activation,
-    int64_t uid, double fmha_scale,
+    int64_t uid, double fmha_scale, bool is_flash_attention,
     absl::Span<const int64_t> intermediate_tensor_dimensions,
     absl::Span<const int64_t> intermediate_tensor_layout,
     DotDimensionNumbers bmm1_dot_dimension_numbers,
@@ -364,7 +380,7 @@ static absl::Status FusedAttentionForwardImpl(
             fmha_scale, intermediate_tensor_dimensions,
             intermediate_tensor_layout, algorithm_config,
             bmm1_dot_dimension_numbers, bmm2_dot_dimension_numbers,
-            dropout_attrs);
+            is_flash_attention, dropout_attrs);
 
         StatusOr<GpufMHAConfig> config = GpufMHAConfig::For(descriptor);
         if (!config.ok()) return tsl::ToAbslStatus(config.status());
@@ -416,8 +432,12 @@ static absl::Status FusedAttentionBackwardImpl(
     StridedMemrefView bmm2_grad_gemm1_lhs, StridedMemrefView d_output,
     std::optional<StridedMemrefView> mask, StridedMemrefView d_bmm1_lhs,
     StridedMemrefView d_bmm1_rhs, StridedMemrefView d_bmm2_rhs,
-    StridedMemrefView d_S, FlatMemrefView scratch,
-    std::optional<StridedMemrefView> d_bias, int64_t uid, double fmha_scale,
+    std::optional<StridedMemrefView> d_S, FlatMemrefView scratch,
+    std::optional<StridedMemrefView> d_bias, std::optional<StridedMemrefView> softmax_sum, 
+    std::optional<StridedMemrefView> d_Q_accum, std::optional<StridedMemrefView> fwd_output,
+    int64_t uid, double fmha_scale, bool is_flash_attention,
+    absl::Span<const int64_t> intermediate_tensor_dimensions,
+    absl::Span<const int64_t> intermediate_tensor_layout,
     DotDimensionNumbers bmm1_grad_gemm1_dot_dimension_numbers,
     DotDimensionNumbers bmm1_grad_gemm2_dot_dimension_numbers,
     DotDimensionNumbers bmm2_grad_gemm1_dot_dimension_numbers,
@@ -436,11 +456,15 @@ static absl::Status FusedAttentionBackwardImpl(
         GpufMHABackwardDescriptor descriptor = GetGpufMHABackwardDescriptor(
             kind, bmm1_grad_gemm1_rhs, bmm1_grad_gemm2_rhs, bmm2_grad_gemm2_rhs,
             bmm2_grad_gemm1_lhs, d_output, mask, d_bias, d_bmm1_lhs, d_bmm1_rhs,
-            d_bmm2_rhs, d_S, fmha_scale, algorithm_config,
+            d_bmm2_rhs, d_S, softmax_sum, d_Q_accum, fwd_output,
+            fmha_scale, algorithm_config,
             bmm1_grad_gemm1_dot_dimension_numbers,
             bmm1_grad_gemm2_dot_dimension_numbers,
             bmm2_grad_gemm1_dot_dimension_numbers,
-            bmm2_grad_gemm2_dot_dimension_numbers, dropout_attrs);
+            bmm2_grad_gemm2_dot_dimension_numbers,
+            intermediate_tensor_dimensions,
+            intermediate_tensor_layout,
+            is_flash_attention, dropout_attrs);
 
         StatusOr<GpufMHABackwardConfig> config =
             GpufMHABackwardConfig::For(descriptor);
@@ -463,8 +487,12 @@ static absl::Status FusedAttentionBackwardImpl(
   se::DeviceMemoryBase d_bmm1_lhs_buffer = GetDeviceAddress(d_bmm1_lhs);
   se::DeviceMemoryBase d_bmm1_rhs_buffer = GetDeviceAddress(d_bmm1_rhs);
   se::DeviceMemoryBase d_bmm2_rhs_buffer = GetDeviceAddress(d_bmm2_rhs);
-  se::DeviceMemoryBase d_S_buffer = GetDeviceAddress(d_S);
   se::DeviceMemoryBase scratch_buffer = GetDeviceAddress(scratch);
+
+  se::DeviceMemoryBase d_S_buffer;
+  if (d_S.has_value()) {
+    d_S_buffer = GetDeviceAddress(*d_S);
+  }
 
   se::DeviceMemoryBase mask_buffer;
   if (mask.has_value()) {
@@ -476,6 +504,21 @@ static absl::Status FusedAttentionBackwardImpl(
     d_bias_buffer = GetDeviceAddress(*d_bias);
   }
 
+  se::DeviceMemoryBase softmax_sum_buffer;
+  if (softmax_sum.has_value()) {
+    softmax_sum_buffer = GetDeviceAddress(*softmax_sum);
+  }
+
+  se::DeviceMemoryBase d_Q_accum_buffer;
+  if (d_Q_accum.has_value()) {
+    d_Q_accum_buffer = GetDeviceAddress(*d_Q_accum);
+  }
+
+  se::DeviceMemoryBase fwd_output_buffer;
+  if (fwd_output.has_value()) {
+    fwd_output_buffer = GetDeviceAddress(*fwd_output);
+  }
+
   RunFusedMHABackwardOptions opts;
   opts.runner_cache = &(*fda)->runner;
 
@@ -484,7 +527,8 @@ static absl::Status FusedAttentionBackwardImpl(
       (*fda)->config, bmm1_grad_gemm1_rhs_buffer, bmm1_grad_gemm2_rhs_buffer,
       bmm2_grad_gemm1_lhs_buffer, bmm2_grad_gemm2_rhs_buffer, d_output_buffer,
       scratch_buffer, d_bmm1_lhs_buffer, d_bmm1_rhs_buffer, d_bmm2_rhs_buffer,
-      d_S_buffer, mask_buffer, d_bias_buffer, run_options->stream(), opts);
+      d_S_buffer, softmax_sum_buffer, d_Q_accum_buffer, mask_buffer, d_bias_buffer,
+      fwd_output_buffer, run_options->stream(), opts);
   if (!st.ok() || !run_options->stream()->ok()) {
     return tsl::ToAbslStatus(st);
   }
@@ -500,6 +544,7 @@ auto BindFusedAttentionAttributes(runtime::CustomCallBinding<Ts...> binding) {
   return std::move(binding)
       .template Attr<int64_t>("uid")
       .template Attr<double>("fmha_scale")
+      .template Attr<bool>("is_flash_attention")
       .template Attr<absl::Span<const int64_t>>(
           "intermediate_tensor_dimensions")
       .template Attr<absl::Span<const int64_t>>("intermediate_tensor_layout")
@@ -805,6 +850,10 @@ auto BindFusedAttentionBackwardAttributes(
   return std::move(binding)
       .template Attr<int64_t>("uid")
       .template Attr<double>("fmha_scale")
+      .template Attr<bool>("is_flash_attention")
+      .template Attr<absl::Span<const int64_t>>(
+          "intermediate_tensor_dimensions")
+      .template Attr<absl::Span<const int64_t>>("intermediate_tensor_layout")
       .template Attr<DotDimensionNumbers>(
           "bmm1_grad_gemm1_dot_dimension_numbers")
       .template Attr<DotDimensionNumbers>(
@@ -826,7 +875,7 @@ auto FusedAttentionBackwardCall(const char* name) {
       .Arg<StridedMemrefView>()  // bmm1_grad_gemm2_rhs
       .Arg<StridedMemrefView>()  // bmm2_grad_gemm2_rhs
       .Arg<StridedMemrefView>()  // bmm2_grad_gemm1_lhs
-      .Arg<StridedMemrefView>();
+      .Arg<StridedMemrefView>(); // d_output
 }
 
 XLA_RUNTIME_DEFINE_CUSTOM_CALL(
@@ -842,6 +891,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Arg<StridedMemrefView>()                   // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Value(std::optional<double>())   // dropout_rate
         .Value(std::optional<int64_t>())  // seed
@@ -860,6 +912,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Value(std::optional<StridedMemrefView>())  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Value(std::optional<double>())   // dropout_rate
         .Value(std::optional<int64_t>())  // seed
@@ -878,6 +933,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Arg<StridedMemrefView>()                   // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Attr<double>("dropout_rate")  // dropout_rate
         .Attr<int64_t>("seed")         // seed
@@ -896,6 +954,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Value(std::optional<StridedMemrefView>())  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Attr<double>("dropout_rate")  // dropout_rate
         .Attr<int64_t>("seed")         // seed
@@ -914,6 +975,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()  // d_S
             .Arg<FlatMemrefView>()     // scratch
             .Arg<StridedMemrefView>()  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Value(std::optional<double>())   // dropout_rate
         .Value(std::optional<int64_t>())  // seed
@@ -932,6 +996,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Value(std::optional<StridedMemrefView>())  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Value(std::optional<double>())   // dropout_rate
         .Value(std::optional<int64_t>())  // seed
@@ -950,6 +1017,9 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()  // d_S
             .Arg<FlatMemrefView>()     // scratch
             .Arg<StridedMemrefView>()  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Attr<double>("dropout_rate")  // dropout_rate
         .Attr<int64_t>("seed")         // seed
@@ -968,10 +1038,37 @@ XLA_RUNTIME_DEFINE_CUSTOM_CALL(
             .Arg<StridedMemrefView>()                   // d_S
             .Arg<FlatMemrefView>()                      // scratch
             .Value(std::optional<StridedMemrefView>())  // d_bias
+            .Value(std::optional<StridedMemrefView>())  // softmax_sum
+            .Value(std::optional<StridedMemrefView>())  // d_Q_accum
+            .Value(std::optional<StridedMemrefView>())  // fwd_output
         )
         .Attr<double>("dropout_rate")  // dropout_rate
         .Attr<int64_t>("seed")         // seed
 );
+
+
+// flash attention backward custom call
+XLA_RUNTIME_DEFINE_CUSTOM_CALL(
+    FlashAttentionScaleSoftmaxBackward,
+    FunctionWrapper<FusedAttentionBackwardImpl>(), checks,
+    BindFusedAttentionBackwardAttributes(
+        FusedAttentionBackwardCall(
+            "xla.gpu.flash.attention.backward.scale.softmax")
+            .Value(std::optional<StridedMemrefView>())  // mask
+            .Arg<StridedMemrefView>()                   // d_bmm1_lhs
+            .Arg<StridedMemrefView>()                   // d_bmm1_rhs
+            .Arg<StridedMemrefView>()                   // d_bmm2_rhs
+            .Value(std::optional<StridedMemrefView>())  // d_S
+            .Arg<FlatMemrefView>()                      // scratch
+            .Value(std::optional<StridedMemrefView>())  // d_bias
+            .Arg<StridedMemrefView>()                   // softmax_sum
+            .Arg<StridedMemrefView>()                   // d_Q_accum
+            .Arg<StridedMemrefView>()                   // fwd_output
+        )
+        .Value(std::optional<double>())   // dropout_rate
+        .Value(std::optional<int64_t>())  // seed
+);
+
 //===----------------------------------------------------------------------===//
 // cuBLASLt custom calls bindings and registration.
 //===----------------------------------------------------------------------===//
@@ -1040,6 +1137,12 @@ void RegisterFusedAttentionBackwardCustomCalls(
                     FusedAttentionScaleBiasMaskSoftmaxDropoutBackward);
   registry.Register(fused_attention("scale.mask.softmax.dropout"),
                     FusedAttentionScaleMaskSoftmaxDropoutBackward);
+  // flash attention bwd
+  auto flash_attention = [](std::string name) {
+    return "xla.gpu.flash.attention.backward." + name;
+  };
+  registry.Register(flash_attention("scale.softmax"),
+                    FlashAttentionScaleSoftmaxBackward);
 }
 }  // namespace gpu
 }  // namespace xla

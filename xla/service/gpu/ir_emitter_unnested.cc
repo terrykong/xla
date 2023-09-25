@@ -1301,7 +1301,7 @@ Status IrEmitterUnnested::EmitFusedMHABackwardThunk(mlir::Operation* op) {
           GetShape(fmha.getMask()).layout().minor_to_major());
 
       TF_ASSIGN_OR_RETURN(mask_slice, GetAllocationSlice(fmha.getMask()));
-
+    }
     // add flash attention backward related slice here
     if (fmha.getSoftmaxSum() != nullptr) {
       TF_ASSIGN_OR_RETURN(softmax_sum_slice,

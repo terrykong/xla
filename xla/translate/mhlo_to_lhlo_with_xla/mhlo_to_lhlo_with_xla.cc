@@ -1342,7 +1342,7 @@ tsl::StatusOr<Operation*> LhloDialectEmitter::EmitDnnfMHABackward(
                                1,
                                1,
                                has_mask ? 1 : 0,
-                               is_flash_attention ? 1 : 0
+                               is_flash_attention ? 1 : 0,
                                1,
                                1,
                                1,
@@ -1354,8 +1354,6 @@ tsl::StatusOr<Operation*> LhloDialectEmitter::EmitDnnfMHABackward(
     op->setAttr(op.getOperandSegmentSizeAttr(),
                 builder_.getDenseI32ArrayAttr(operand_sizes));
 
-    op.setDropoutRateAttr(builder_.getF64FloatAttr(config.dropout_rate()));
-    op.setSeedAttr(builder_.getI64IntegerAttr(config.seed()));
     // set is flash attention here
     op.setIsFlashAttentionAttr(builder_.getBoolAttr(config.is_flash_attention()));
   
@@ -1374,7 +1372,7 @@ tsl::StatusOr<Operation*> LhloDialectEmitter::EmitDnnfMHABackward(
     return op.getOperation();
   };
 
-  llvm::SmallVector<Value, 14> operands;
+  llvm::SmallVector<Value, 15> operands;
   TF_RETURN_IF_ERROR(GetOrCreateView(custom_call->operand(0), &operands)); // Q
   TF_RETURN_IF_ERROR(GetOrCreateView(custom_call->operand(1), &operands)); // K
   TF_RETURN_IF_ERROR(GetOrCreateView(custom_call->operand(2), &operands)); // V

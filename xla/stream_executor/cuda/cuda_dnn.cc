@@ -3687,7 +3687,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnMaskFwdTensor(
   // Create the mask output tensor
   TF_ASSIGN_OR_RETURN(
       auto mask_out_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 300,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 400,
                         dnn::DataType::kFloat, 1, -1,
                         /*is_virtual=*/true));
 
@@ -3759,7 +3759,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnBiasTensor(
   dnn::DataType bias_out_type = use_mask ? dtype : dnn::DataType::kFloat;
   TF_ASSIGN_OR_RETURN(
       auto bias_out_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 200,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 300,
                         bias_out_type, 1, -1,
                         /*is_virtual=*/true));
 
@@ -3813,7 +3813,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnSoftmaxFwdTensor(
   TF_ASSIGN_OR_RETURN(
       auto max_reduction_output_tensor,
       CreateCudnnTensor(reduction_output_dim, reduction_output_stride,
-                        CudnnfMHAUid::VIRTUAL_ID + 400, dnn::DataType::kFloat,
+                        CudnnfMHAUid::VIRTUAL_ID + 500, dnn::DataType::kFloat,
                         1, -1, /*is_virtual=*/true));
 
   // Create the reduction descriptor
@@ -3835,7 +3835,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnSoftmaxFwdTensor(
   // Create output tensor of the subtraction op.
   TF_ASSIGN_OR_RETURN(
       auto subtract_output_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 401,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 501,
                         dnn::DataType::kFloat, 1, -1,
                         /*is_virtual=*/true));
   // Create the subtraction descriptor
@@ -3850,7 +3850,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnSoftmaxFwdTensor(
   // Create output tensor of the exp op.
   TF_ASSIGN_OR_RETURN(
       auto exp_output_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 402,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 502,
                         dnn::DataType::kFloat, 1, -1,
                         /*is_virtual=*/true));
   // Create the exponetial descriptor
@@ -3866,7 +3866,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnSoftmaxFwdTensor(
   TF_ASSIGN_OR_RETURN(
       auto sum_reduction_output_tensor,
       CreateCudnnTensor(reduction_output_dim, reduction_output_stride,
-                        CudnnfMHAUid::VIRTUAL_ID + 403, dnn::DataType::kFloat,
+                        CudnnfMHAUid::VIRTUAL_ID + 503, dnn::DataType::kFloat,
                         1, -1, /*is_virtual=*/true));
   // Create the reduction descriptor
   auto sum_reduction_desc =
@@ -3885,7 +3885,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnSoftmaxFwdTensor(
   RETURN_MSG_IF_CUDNN_ERROR(sum_reduction_op);
 
   // Create output tensor of the divide op.
-  auto uid = is_virtual ? CudnnfMHAUid::VIRTUAL_ID + 404 : CudnnfMHAUid::P_ID;
+  auto uid = is_virtual ? CudnnfMHAUid::VIRTUAL_ID + 504 : CudnnfMHAUid::P_ID;
   TF_ASSIGN_OR_RETURN(
       auto divide_output_tensor,
       CreateCudnnTensor(
@@ -3929,11 +3929,11 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnDropoutFwdTensor(
   // Create tensor for dropout's mask.
   TF_ASSIGN_OR_RETURN(
       auto mask_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 500,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 600,
                         dnn::DataType::kFloat, 1, -1,
                         /*is_virtual*/ true));
   // Create output tensor of dropout node
-  auto uid = is_virtual ? CudnnfMHAUid::VIRTUAL_ID + 501 : CudnnfMHAUid::P_ID;
+  auto uid = is_virtual ? CudnnfMHAUid::VIRTUAL_ID + 601 : CudnnfMHAUid::P_ID;
   TF_ASSIGN_OR_RETURN(
       auto dropout_out_tensor,
       CreateCudnnTensor(
@@ -3996,7 +3996,7 @@ tsl::StatusOr<cudnn_frontend::Tensor> CreateCudnnDropoutFwdTensor(
   // Create output of scale node
   TF_ASSIGN_OR_RETURN(
       auto dropout_scale_out_tensor,
-      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 502, dtype, 1,
+      CreateCudnnTensor(dims, strides, CudnnfMHAUid::VIRTUAL_ID + 602, dtype, 1,
                         -1, /*is_virtual*/ true));
   // Create the scaling desc
   TF_ASSIGN_OR_RETURN(auto scale_desc,
@@ -5673,7 +5673,6 @@ GetCudnnFusedMHABackwardOperationGraph(
     const dnn::MatmulTensorDescriptor& bmm2_grad_gemm1_lhs_descriptor,
     const dnn::MatmulTensorDescriptor& bmm2_grad_gemm2_rhs_descriptor,
     const dnn::MatmulTensorDescriptor& d_output_descriptor,
-    const dnn::TensorDescriptor& d_s_descriptor,
     const dnn::TensorDescriptor& d_bmm1_lhs_descriptor,
     const dnn::TensorDescriptor& d_bmm1_rhs_descriptor,
     const dnn::TensorDescriptor& d_bmm2_rhs_descriptor, dnn::FusedMHAKind kind,
@@ -6448,9 +6447,9 @@ GetCudnnFlashAttentionOperationGraph(
     const dnn::MatmulTensorDescriptor& bmm1_rhs_descriptor,
     const dnn::MatmulTensorDescriptor& bmm2_rhs_descriptor,
     const dnn::MatmulTensorDescriptor& intermediate_bmm2_lhs_descriptor,
-    const dnn::TensorDescriptor& mask_descriptor,
-    const dnn::TensorDescriptor& bias_descriptor,
     const dnn::TensorDescriptor& output_descriptor,
+    std::optional<dnn::TensorDescriptor> mask_descriptor,
+    std::optional<dnn::TensorDescriptor> bias_descriptor,
     std::optional<dnn::TensorDescriptor> activation_descriptor,
     dnn::FusedMHAKind kind, std::optional<double> dropout_rate,
     std::optional<int64_t> seed, CudnnHandle& cudnn, double scale, std::vector<int64_t>& intermediate_shape,
@@ -6755,8 +6754,6 @@ GetCudnnFlashAttentionBackwardOperationGraph(
     const dnn::MatmulTensorDescriptor& bmm2_grad_gemm1_lhs_descriptor,
     const dnn::MatmulTensorDescriptor& bmm2_grad_gemm2_rhs_descriptor,
     const dnn::MatmulTensorDescriptor& d_output_descriptor,
-    const dnn::TensorDescriptor& mask_descriptor,
-    const dnn::TensorDescriptor& d_s_descriptor,
     const dnn::TensorDescriptor& d_bmm1_lhs_descriptor,
     const dnn::TensorDescriptor& d_bmm1_rhs_descriptor,
     const dnn::TensorDescriptor& d_bmm2_rhs_descriptor, dnn::FusedMHAKind kind,
@@ -7969,8 +7966,8 @@ class CudnnExecutionPlanRunner<void(Args...)>
       data_ptrs_vec.pop_back();
     }
 
-    if (sizeof...(Args) == 13 || sizeof...(Args) == 14) {
-      // is training
+    if (sizeof...(Args) == 7 || sizeof...(Args) == 14) {
+      // is attention fwd or bwd
       data_ptrs_vec.erase(std::remove(data_ptrs_vec.begin(), data_ptrs_vec.end(), nullptr), data_ptrs_vec.end());
       // ensure the size is equal after removing useless pointers
       CHECK(data_ptrs_vec.size() == data_uids_vec.size());
@@ -8003,7 +8000,6 @@ class CudnnExecutionPlanRunner<void(Args...)>
           "8.8.");
 #endif  // CUDNN_VERSION >= 8800 && TF_ENABLE_CUDNN_FRONTEND
     }
-
     auto variantPack =
         cudnn_frontend::VariantPackBuilder()
             .setWorkspacePointer(scratch_memory.opaque())
@@ -8021,10 +8017,10 @@ class CudnnExecutionPlanRunner<void(Args...)>
         std::optional<GpuTimer> timer,
         GpuTimer::CreateIfNeeded(AsGpuStream(stream), is_profiling));
 
-    if (sizeof...(Args) == 13 || sizeof...(Args) == 14) {
+    if (sizeof...(Args) == 14) {
       // is training
       if (is_flash_attention_) {
-        // should memset dq_accum cuz it is being atomic added
+        // should memset dq_accum because it is being atomic added
         std::vector<DeviceMemoryBase> dev_mem { inputs... };
         DeviceMemoryBase* dev_dq_accum = &(dev_mem[10]);
         stream->ThenMemZero(dev_dq_accum, dev_dq_accum->size());
@@ -9048,14 +9044,14 @@ CudnnSupport::FusedMHARunnerFromDesc(
 
   TF_ASSIGN_OR_RETURN(
       auto runner,
-      CudnnExecutionPlanRunner<dnn::FusedMHASoftmaxSignature>::Create(
+      CudnnExecutionPlanRunner<dnn::FusedMHASignature>::Create(
           parent_, cudnn_.get(), std::move(execution_plan), u_ids,
           /*need_side_input*/ true,
           /*has_activation_output*/ (activation_descriptor != std::nullopt),
           scalar_input_uids, scalar_input_values, dropout_rng_seed,
           dropout_rng_offset, is_flash_attention));
   return {
-      std::make_unique<CudnnExecutionPlanRunner<dnn::FusedMHASoftmaxSignature>>(
+      std::make_unique<CudnnExecutionPlanRunner<dnn::FusedMHASignature>>(
           std::move(runner))};
 #else
   return absl::UnimplementedError(
@@ -9075,7 +9071,7 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
     const dnn::TensorDescriptor& d_bmm1_lhs_descriptor,
     const dnn::TensorDescriptor& d_bmm1_rhs_descriptor,
     const dnn::TensorDescriptor& d_bmm2_rhs_descriptor,
-    const dnn::TensorDescriptor& d_s_descriptor,
+    std::optional<dnn::TensorDescriptor> d_s_descriptor,
     std::optional<dnn::TensorDescriptor> mask_descriptor,
     std::optional<dnn::TensorDescriptor> d_bias_descriptor,
     std::optional<dnn::TensorDescriptor> fwd_output_descriptor, double scale,
@@ -9091,7 +9087,7 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
       GetCudnnFlashAttentionBackwardOperationGraph(
           bmm1_grad_gemm1_rhs_descriptor, bmm1_grad_gemm2_rhs_descriptor,
           bmm2_grad_gemm1_lhs_descriptor, bmm2_grad_gemm2_rhs_descriptor,
-          d_output_descriptor, mask_descriptor, d_s_descriptor, d_bmm1_lhs_descriptor,
+          d_output_descriptor, d_bmm1_lhs_descriptor,
           d_bmm1_rhs_descriptor, d_bmm2_rhs_descriptor, kind, dropout_rate,
           seed, cudnn, scale, intermediate_shape, use_dropout,
           /*use_mask*/ mask_descriptor != std::nullopt,
@@ -9099,9 +9095,9 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
       : GetCudnnFusedMHABackwardOperationGraph(
           bmm1_grad_gemm1_rhs_descriptor, bmm1_grad_gemm2_rhs_descriptor,
           bmm2_grad_gemm1_lhs_descriptor, bmm2_grad_gemm2_rhs_descriptor,
-          d_output_descriptor, mask_descriptor, d_s_descriptor,
-          d_bmm1_lhs_descriptor, d_bmm1_rhs_descriptor, d_bmm2_rhs_descriptor,
-          kind, dropout_rate, seed, cudnn, scale, intermediate_shape, use_dropout,
+          d_output_descriptor, d_bmm1_lhs_descriptor, 
+          d_bmm1_rhs_descriptor, d_bmm2_rhs_descriptor, kind, dropout_rate, 
+          seed, cudnn, scale, intermediate_shape, use_dropout,
           /*use_mask*/ mask_descriptor != std::nullopt,
           /*use_bias*/ d_bias_descriptor != std::nullopt));
   // The function  GetExecPlanFromHeuristics uses
@@ -9176,13 +9172,13 @@ CudnnSupport::FusedMHABackwardRunnerFromDesc(
   }
   TF_ASSIGN_OR_RETURN(
       auto runner,
-      CudnnExecutionPlanRunner<dnn::FusedMHASoftmaxBackwardSignature>::Create(
+      CudnnExecutionPlanRunner<dnn::FusedMHABackwardSignature>::Create(
           parent_, cudnn_.get(), std::move(execution_plan),
           uids, /*need_side_input*/ true, /*has_activation_output*/ false,
           scalar_uids, scalar_values, dropout_rng_seed,
           /*dropout_rng_offset*/ dropout_rng_offset, /*is_flash_attention*/ is_flash_attention));
   return {std::make_unique<
-      CudnnExecutionPlanRunner<dnn::FusedMHASoftmaxBackwardSignature>>(
+      CudnnExecutionPlanRunner<dnn::FusedMHABackwardSignature>>(
       std::move(runner))};
 #else
   return absl::UnimplementedError(

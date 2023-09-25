@@ -341,7 +341,7 @@ def LHLOGPU_fusedMHAOp : LHLOGPU_Op<"fMHA", [AttrSizedOperandSegments]> {
     FusedMHAAlgorithmConfigAttr:$algorithm_config,
     OptionalAttr<F64Attr>:$dropout_rate,
     OptionalAttr<I64Attr>:$seed,
-    BoolAttr:$isFlashAttention
+    BoolAttr:$is_flash_attention
     );
 }
 
@@ -373,7 +373,7 @@ def LHLOGPU_fusedMHABackwardOp : LHLOGPU_Op<"fMHABackward", [AttrSizedOperandSeg
     FusedMHAAlgorithmConfigAttr:$algorithm_config,
     OptionalAttr<F64Attr>:$dropout_rate,
     OptionalAttr<I64Attr>:$seed,
-    BoolAttr:$isFlashAttention
+    BoolAttr:$is_flash_attention
     );
 }
 

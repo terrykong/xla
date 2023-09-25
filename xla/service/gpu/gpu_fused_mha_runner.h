@@ -133,9 +133,7 @@ struct GpufMHABackwardConfig {
   se::dnn::TensorDescriptor d_bmm1_lhs;
   se::dnn::TensorDescriptor d_bmm1_rhs;
   se::dnn::TensorDescriptor d_bmm2_rhs;
-  se::dnn::TensorDescriptor d_s;
-  se::dnn::TensorDescriptor softmax_sum;
-  se::dnn::TensorDescriptor d_Q_accum;
+  std::optional<se::dnn::TensorDescriptor> d_s;
   std::optional<se::dnn::TensorDescriptor> mask;
   std::optional<se::dnn::TensorDescriptor> d_bias;
   std::optional<se::dnn::TensorDescriptor> fwd_output;

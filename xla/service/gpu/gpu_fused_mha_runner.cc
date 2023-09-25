@@ -214,11 +214,12 @@ Status RunFusedMHABackward(
     DeviceMemoryBase d_s_buffer, 
     DeviceMemoryBase softmax_buffer,
     DeviceMemoryBase d_Q_accum_buffer,
+    DeviceMemoryBase mask_buffer,
     DeviceMemoryBase d_bias_buffer,
     DeviceMemoryBase fwd_output_buffer,
     DeviceMemoryBase scratch_memory) {
   se::dnn::LazyOpRunner<se::dnn::FusedMHABackwardOp> *lazy_runner =
-      options.runner_cache->AsFusedMHASoftmaxBackwardRunner();
+      options.runner_cache->AsFusedMHABackwardRunner();
   std::optional<se::dnn::LazyOpRunner<se::dnn::FusedMHABackwardOp>>
       local_runner;
   if (!lazy_runner) {
@@ -569,6 +570,7 @@ Status RunGpuFMHABackwardImpl(const GpufMHABackwardParams &params,
                                                 mask_shape.element_type()));
     config.mask = TensorDescriptor::For(mask_type, mask_shape.dimensions(),
                                         mask_shape.layout().minor_to_major());
+  }
   if(desc.fwd_output_shape) {
     const Shape &fwd_output_shape = *desc.fwd_output_shape;
     TF_ASSIGN_OR_RETURN(

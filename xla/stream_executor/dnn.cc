@@ -245,7 +245,7 @@ DnnSupport::FusedMHABackwardRunnerFromDesc(
     const TensorDescriptor& d_bmm1_lhs_descriptor,
     const TensorDescriptor& d_bmm1_rhs_descriptor,
     const TensorDescriptor& d_bmm2_rhs_descriptor,
-    const TensorDescriptor& d_s_descriptor,
+    std::optional<dnn::TensorDescriptor> d_s_descriptor,
     std::optional<dnn::TensorDescriptor> mask_descriptor,
     std::optional<dnn::TensorDescriptor> d_bias_descriptor,
     std::optional<dnn::TensorDescriptor> fwd_output_descriptor, double scale,
